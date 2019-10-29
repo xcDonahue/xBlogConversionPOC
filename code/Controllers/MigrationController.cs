@@ -519,8 +519,33 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
 
             }
 
+            newTagString = removeDuplicateGuids(newTagString);
+
             return newTagString;
 
+        }
+
+        private string removeDuplicateGuids(string newTagString)
+        {
+            string[] ids = newTagString.Split('|').Distinct().ToArray();
+            var tagCount = 0;
+            var dedupedString = string.Empty;
+            foreach (var id in ids)
+            {
+
+                if (tagCount == 0)
+                {
+                    dedupedString += id;
+                    tagCount++;
+                }
+                else
+                {
+                    dedupedString += $"|{id}";
+                    tagCount++;
+                }
+            }
+
+            return dedupedString;
         }
 
         private static string ToStringWithSuffix(DateTime dt)
