@@ -1,3 +1,6 @@
 code/bin/
 code/obj/Debug/
 code/obj/Release/
+code/.vs/config/applicationhost.config
+code/.vs/
+packages/

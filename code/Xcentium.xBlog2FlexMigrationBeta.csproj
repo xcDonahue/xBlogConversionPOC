@@ -47,6 +47,9 @@
       <HintPath>..\..\..\packages\HtmlAgilityPack.1.4.9.5\lib\Net45\HtmlAgilityPack.dll</HintPath>
     </Reference>
     <Reference Include="Microsoft.CSharp" />
+    <Reference Include="Newtonsoft.Json, Version=11.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\packages\Newtonsoft.Json.11.0.2\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="Sitecore.Buckets, Version=4.0.0.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\..\..\packages\Sitecore.Buckets.9.1.0\lib\net471\Sitecore.Buckets.dll</HintPath>
     </Reference>
@@ -121,9 +124,12 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Content\tagsConversionDictionary.json" />
+    <Content Include="Content\TagsList.csv" />
     <None Include="Properties\PublishProfiles\local.pubxml" />
     <None Include="Properties\PublishProfiles\xcFlex.pubxml" />
     <Content Include="Views\Taxonomy\CategoriesList.cshtml" />
+    <Content Include="Views\Taxonomy\CreateTags.cshtml" />
     <None Include="Views\_ViewStart.cshtml" />
     <Content Include="Views\Taxonomy\TagsList.cshtml" />
     <None Include="Web.config" />
