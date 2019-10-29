@@ -9,6 +9,8 @@ using System.Web.Mvc;
 using System.Xml;
 using System.Xml.Linq;
 using HtmlAgilityPack;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Sitecore;
 using Sitecore.Data;
 using Sitecore.Data.Fields;
@@ -21,7 +23,7 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
     public class MigrationController : Controller
     {
         readonly static Sitecore.Data.Database _db = Sitecore.Configuration.Factory.GetDatabase("master");
-        readonly Item _blogSrcItem = _db.GetItem("/sitecore/content/Home/origBlog");
+        readonly Item _blogSrcItem = _db.GetItem("/sitecore/content/Home/Blog");
         readonly Item _blogDestItem = _db.GetItem("/sitecore/content/Home/Blog New");
         readonly Item _blogCategory = _db.GetItem("{F66EAEA8-E3BD-4D05-84BE-DF6282D10A56}");
         //readonly Item _blogPostDataMaster = _db.GetItem("{53376817-B2A7-462F-89FD-3E8130491E4D}");
@@ -110,6 +112,7 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
             var postArticleBody = item["Article Body"];
             postArticleBody = CleanRTE(postArticleBody);
             var postAuthorItem = _db.GetItem(postAuthorID);
+            
             var authorName = (postAuthorItem == null) ? "" : postAuthorItem["Full Name"];
             var postSummary = HTMLToText(item["Article Summary"]);
             DateField dateField = (DateField)item.Fields["Publish Date"];
@@ -460,14 +463,64 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
 
         private void updateBlogPost(Item item, Item srcItem)
         {
+            var oldTagStrings = srcItem["Tags"];
+            var newTagStrings = string.Empty;
+
+            if (!string.IsNullOrEmpty(oldTagStrings))
+            {
+                newTagStrings = getUpdatedTags(oldTagStrings);
+            }
+            
             using (new SecurityDisabler())
             {
                 item.Editing.BeginEdit();
-
+                item["Tags"] = newTagStrings;
                 item["category"] = _blogCategory.Name;
                 item[Sitecore.FieldIDs.Created] = srcItem[Sitecore.FieldIDs.Created];
                 item.Editing.EndEdit();
             }
+        }
+
+        private string getUpdatedTags(string oldTagStrings)
+        {
+            JObject mappingJson = JObject.Parse(System.IO.File.ReadAllText(@"C:\projects\XC.com\Static\Flex.V2.Sitecore-master\src\External\code\Content\tagsConversionDictionary.json"));
+            var dictionary = mappingJson.ToObject<Dictionary<string, string>>();
+
+            var oldArray = oldTagStrings.Split('|').ToArray();
+            var tagCount = 0;
+            var newTagString = string.Empty;
+
+            foreach(var id in oldArray)
+            {
+                var oldTag = _db.GetItem(id);
+                var oldTagName = oldTag?.Name;
+
+                if (dictionary.ContainsKey(oldTagName))
+                {
+                    var value = dictionary[oldTagName];
+                    var newTagItem = _db.GetItem($"/sitecore/content/Global Settings/Taxonomy/{value}");
+
+                    if(newTagItem != null)
+                    {
+                        if(tagCount == 0)
+                        {
+                            newTagString += newTagItem.ID.ToString();
+                            tagCount++;
+                        }
+                        else
+                        {
+                            newTagString += $"|{newTagItem.ID.ToString()}";
+                            tagCount++;
+                        }
+                        
+                    }
+                    
+                }
+
+            }
+
+            return newTagString;
+
         }
 
         private static string ToStringWithSuffix(DateTime dt)
