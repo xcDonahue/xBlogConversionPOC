@@ -23,8 +23,8 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
     public class MigrationController : Controller
     {
         readonly static Sitecore.Data.Database _db = Sitecore.Configuration.Factory.GetDatabase("master");
-        readonly Item _blogSrcItem = _db.GetItem("/sitecore/content/Home/Blog");
-        readonly Item _blogDestItem = _db.GetItem("/sitecore/content/Home/Blog New");
+        readonly Item _blogSrcItem = _db.GetItem("/sitecore/content/Home/origBlog");
+        readonly Item _blogDestItem = _db.GetItem("/sitecore/content/Home/Blog");
         readonly Item _blogCategory = _db.GetItem("{F66EAEA8-E3BD-4D05-84BE-DF6282D10A56}");
         //readonly Item _blogPostDataMaster = _db.GetItem("{53376817-B2A7-462F-89FD-3E8130491E4D}");
         readonly Item _blogPostDataMaster = _db.GetItem("/sitecore/content/Home/Insights/Blogs/mdTest/Data");
@@ -34,18 +34,29 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
 
         public ActionResult BeginMigration()
         {
+            
             var message = "process complete";
-            if (Request.QueryString["process"] == "true")
+
+            try
             {
-                foreach (Item item in _blogSrcItem.Children)
+                if (Request.QueryString["process"] == "true")
                 {
-                    processChild(item);
+                    foreach (Item item in _blogSrcItem.Children)
+                    {
+                        processChild(item);
+                    }
+                }
+                else
+                {
+                    message = "skip Processing";
                 }
             }
-            else
+            catch (Exception ex)
             {
-                message = "skip Processing";
+                Sitecore.Diagnostics.Error.LogError(ex.Message);
             }
+
+            
 
             return View("~/Views/Migration/Blog.cshtml",(object)message);
         }
@@ -71,7 +82,7 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
             else
             {
                 //this is a blog post item so we need to create new post
-                createPost(item);
+                processPost(item);
             }
 
         }
@@ -100,91 +111,172 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
             }
         }
 
-        private void createPost(Item item)
+        private void processPost(Item item)
         {
             var destinationPath = _blogDestItem.Paths.Path + "/" + item.Parent.Parent.Parent.Name + "/" + item.Parent.Parent.Name + "/" + item.Parent.Name;
             var destinationParent = _db.GetItem(destinationPath);
-            var newPost = createItem(destinationParent, "{10B61026-6659-44D5-AD22-03EC72776DAC}", item.Name);
 
-            var postAuthorID = item["Author"];
+            var post = _db.GetItem(destinationPath + "/" + item.Name);
 
-            var postTitle = item["Main Title"];
-            var postArticleBody = item["Article Body"];
-            postArticleBody = CleanRTE(postArticleBody);
-            var postAuthorItem = _db.GetItem(postAuthorID);
-            
-            var authorName = (postAuthorItem == null) ? "" : postAuthorItem["Full Name"];
-            var postSummary = HTMLToText(item["Article Summary"]);
-            DateField dateField = (DateField)item.Fields["Publish Date"];
-            var postDate = ToStringWithSuffix(dateField.DateTime.Date);
+            if (post == null)
+            {
+                createPost(item, destinationParent);
+            }
+            else
+            {
+                updatePost(post, item);
+            }
+                
+        }
+
+        private void createPost(Item oldPost, Item destinationParent)
+        {
+            var newPost = createItem(destinationParent, "{10B61026-6659-44D5-AD22-03EC72776DAC}", oldPost.Name);
+
+            var blogModel = getNewPostDetailsFromOld(newPost, oldPost);
 
             //add datasource folder
             var newDatasource = CopyTemplateAssets(newPost);
 
             //createAuthor card and attach
-            var globalAuthCardItem = getAuthorCard(postAuthorItem);
+            //var globalAuthCardItem = blogModel.Author;
 
             using (new Sitecore.SecurityModel.SecurityDisabler())
             {
                 var old1 = _db.GetItem(newPost.Paths.Path + "/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_2/drop-zone-single_2/drop-zone-single_1");
                 var old2 = _db.GetItem(newPost.Paths.Path + "/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_2/drop-zone-single_2/drop-zone-single_2");
-
-                old1?.Delete();
-                old2?.Delete();
+                deleteItem(old1);
+                deleteItem(old2);
             }
 
 
-                if (globalAuthCardItem != null)
-            {
+            //if (blogModel.Author != null)
+            //{
                 //create card
-                Item card = createAuthorCardItem(globalAuthCardItem);
+                Item card = createAuthorCardItem(blogModel.Author);
 
                 //attach card
                 attachCard(newPost, card);
 
-                //Make sure new card gets added to presentation details down below
-                //
-            }
+            //Make sure new card gets added to presentation details down below
+            //
+            //}
 
-            
+            updatePostRenderings(newDatasource, blogModel);
 
+
+
+            updateBlogTagsAndCategory(newPost, oldPost);
+
+            //add renderings and set datasources
+            addRenderings(newPost);
+        }
+
+        private void updatePostRenderings(Item datafolder, BlogPost newPost)
+        {
             //updateRenderings:
 
             //update fields
             //**newDatasource.Paths.Path**/flex-placeholder_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-heading_2
             //update "Single-Line Text" field - use "Main Title" field from previous
-            updateField(newDatasource.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-heading_2", "Single-Line Text", postTitle);
+            updateField(datafolder.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-heading_2", "Single-Line Text", newPost.Title);
 
             //**newDatasource.Paths.Path**/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-heading-rich_1
             //update "Rich Text" field with empty string (no subheaders at the moment)
-            updateField(newDatasource.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-heading-rich_1", "Rich Text", string.Empty);
+            updateField(datafolder.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-heading-rich_1", "Rich Text", string.Empty);
 
             //**newDatasource.Paths.Path**/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-multi-line_3
             //update "Multi-Line Text" field with Article Summary field " ***!!clean paragraph tags and &nbsp;!!****
-            updateField(newDatasource.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-multi-line_3", "Multi-Line Text", postSummary);
+            updateField(datafolder.Parent.Paths.Path, "Article Summary", newPost.Summary);
 
             //**newDatasource.Paths.Path**/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-multi-line_2
             //update "Single-Line Text" field with the content's Publish Date ex "October 17th, 2019"
-            updateField(newDatasource.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-single-line_2", "Single-Line Text", postDate);
+            updateField(datafolder.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-single-line_2", "Single-Line Text", newPost.FriendlyDate);
 
             //**newDatasource.Paths.Path**/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_1/drop-zone-single_1/a-rich-text_1
             //update "Rich Text" field with the content's Article Body field
             ///sitecore/content/Home/Blog New/201.../flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_1/drop-zone-single_1/a-rich-text_1
-            updateField(newDatasource.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_1/drop-zone-single_1/a-rich-text_1", "Rich Text", postArticleBody);
+            updateField(datafolder.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_1/drop-zone-single_1/a-rich-text_1", "Rich Text", newPost.Body);
 
             //update category/type
             ///sitecore/content/Home/Blog New/2012/04/30/Why is my Sitecore site running so slow Check the front end performance/Data/flex-placeholder_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-single-line_1
-            updateField(newDatasource.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-single-line_1", "Single-Line Text", "Blog Post");
+            updateField(datafolder.Paths.Path + "/flex-placeholder_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-single-line_1", "Single-Line Text", newPost.Category);
 
 
             //NOPE - These are author card items... Delete for now
             //**newDatasource.Paths.Path**/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_2/drop-zone-single_2/drop-zone-single_1
             //DELETE CHILDREN - can cirlce back later
+        }
 
-            updateBlogPost(newPost, item);
+        private BlogPost getNewPostDetailsFromOld(Item newPost, Item oldPost)
+        {
+            var post = new BlogPost();
+            post.Title = oldPost["Main Title"];
+            post.Body = CleanRTE(oldPost["Article Body"]);
+            post.Author = getAuthorCard(_db.GetItem(oldPost["Author"]));
+            post.Category = _blogCategory.Name;
+            post.Tags = getNewTags(oldPost,newPost);
+            post.Summary = HTMLToText(oldPost["Article Summary"]);
 
-            //add renderings and set datasources
-            addRenderings(newPost);
+            DateField dateField = (DateField)oldPost.Fields["Publish Date"];
+
+            post.FriendlyDate = ToStringWithSuffix(dateField.DateTime.Date);
+
+            return post;
+        }
+
+        private void updatePost(Item newPost, Item oldPost)
+        {
+            try
+            {
+                //update post
+                var newPostPath = newPost.Paths.Path;
+                var blogModel = getNewPostDetailsFromOld(newPost, oldPost);
+                var dataFolder = _db.GetItem(newPost.Paths.Path + "/Data");
+                //update field values on main post
+                updatePostRenderings(dataFolder, blogModel);
+
+                //update Linked Template Datasource field on /Data/flex-placeholder_2
+                // value needs to be {5D0046BA-D14A-4762-8EA4-8145C7FFA0AC}
+                updateField(newPostPath + "/Data/flex-placeholder_2", "Linked Template Datasource", "{5D0046BA-D14A-4762-8EA4-8145C7FFA0AC}");
+
+                //remove summary child
+                ///**CURRENT POST PATH/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-multi-line_3
+                var summaryChild = _db.GetItem(newPostPath + "/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_2/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_1/a-text-multi-line_3");
+                deleteItem(summaryChild);
+
+                //remove extra drop zone:
+                ///**CURRENT POST PATH/Data/Blogs/previousLaunch/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_2
+                var extraDropZone = _db.GetItem(newPostPath + "/Data/Blogs/previousLaunch/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_1/drop-zone-single_1/drop-zone-single_2");
+                deleteItem(extraDropZone);
+
+                //update **CURRENT POST PATH/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_2/drop-zone-single_2
+                //Editor name shoule read "Author Card"
+                updateField(newPostPath + "/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_3/drop-zone-multi_2/drop-zone-single_2", "Editor name", "Author Card");
+
+                //update **CURRENT POST PATH/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_2
+                //classes need to be fu-boxed f-mb-0 f-w-1/1
+                updateField(newPostPath + "/Data/flex-placeholder_2/drop-zone-multi_1/flex-layout_2", "Classes", "fu-boxed f-mb-0 f-w-1/1");
+
+                //update author card /sitecore/content/Data/Global/Global Content/Author Cards/drop-zone-single_ali_karaki_author/drop-zone-single_1_7657_4082_1492/a-image_1
+                //needs specific classes:fu-aspect-ratio-1/1 f-rounded-full f-shadow-none f--mt-6 f-mb-0.75 f-mx-0 mob:f--mt-3 tab:f--mt-5 lap:f--mt-3 f-p-0/0 f-px-1/5 f-w-1/1
+
+                createAuthorCardItem(blogModel.Author);
+            }
+            catch(Exception ex)
+            {
+                Sitecore.Diagnostics.Error.LogError(ex.Message);
+            }
+            
+
+        }
+
+        private void deleteItem(Item item)
+        {
+            using (new SecurityDisabler())
+            {
+                item?.Delete();
+            }
         }
 
         private void attachCard(Item newPost, Item card)
@@ -210,11 +302,15 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
             updateField(newCard.Paths.Path + "/drop-zone-single_1_7657_4082_1492/a-heading-rich_1", "Rich Text", $"<h2>{globalAuthCardItem.Name}</h2>");
             //sitecore/content/Data/Global/Global Content/Author Cards/drop-zone-single_5112/drop-zone-single_1_7657_4082_1492/a-image_1 "Image"
             updateImageField(newCard.Paths.Path + "/drop-zone-single_1_7657_4082_1492/a-image_1", "Image", globalAuthCardItem.ProfileImage);
+            updateField(newCard.Paths.Path + "/drop-zone-single_1_7657_4082_1492/a-image_1", "Classes", $"fu-aspect-ratio-1/1 f-rounded-full f-shadow-none f--mt-6 f-mb-0.75 f-mx-0 mob:f--mt-3 tab:f--mt-5 lap:f--mt-3 f-p-0/0 f-px-1/5 f-w-1/1");
+
             //sitecore/content/Data/Global/Global Content/Author Cards/drop-zone-single_5112/drop-zone-single_1_7657_4082_1492/a-rich-text_4 "Rich text"
-            updateField(newCard.Paths.Path + "/drop-zone-single_1_7657_4082_1492/a-rich-text_4", "Rich Text", globalAuthCardItem.Bio);
+            //updateField(newCard.Paths.Path + "/drop-zone-single_1_7657_4082_1492/a-rich-text_4", "Rich Text", globalAuthCardItem.Bio);
+            stripImagesFromBio(newCard.Paths.Path + "/drop-zone-single_1_7657_4082_1492/a-rich-text_4", "Rich Text", globalAuthCardItem.Bio);
             //sitecore/content/Data/Global/Global Content/Author Cards/drop-zone-single_5112/drop-zone-single_1_7657_4082_1492/a-text-single-line_2 "Single-Line Text"
             updateField(newCard.Paths.Path + "/drop-zone-single_1_7657_4082_1492/a-text-single-line_2", "Single-Line Text", globalAuthCardItem.Title);
 
+            updateField(newCard.Paths.Path, "Editor name", "Author Card");
 
             //var flexAuthCard4Menu = _db.GetItem("/sitecore/content/Data/Flex Elements Menu/Global Content/Author Cards");
             //copy existing flex menu item to new
@@ -236,6 +332,31 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
 
 
             return newCard;
+        }
+
+        private void stripImagesFromBio(string itemPath, string fieldname, string bio)
+        {
+            var cleanMarkup = string.Empty;
+
+            HtmlDocument document = new HtmlDocument();
+            document.LoadHtml("<html><body>" + bio + "</body></html>");
+
+            HtmlNode bodyContent = document.DocumentNode.SelectSingleNode("//body");
+            var all_images = bodyContent.SelectNodes("//img");
+            
+            if (all_images != null)
+            {
+                foreach (var node in all_images)
+                {
+                    node.Remove();
+                }
+            }
+
+            cleanMarkup = document.DocumentNode.OuterHtml;
+            cleanMarkup = cleanMarkup.Replace("<html><body>", "");
+            cleanMarkup = cleanMarkup.Replace("</body></html>", "");
+
+            updateField(itemPath, fieldname, cleanMarkup);
         }
 
         private void updateAuthCardNavItem(Item authCardNavItem, Item authorCard)
@@ -461,15 +582,9 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
             return null;
         }
 
-        private void updateBlogPost(Item item, Item srcItem)
+        private void updateBlogTagsAndCategory(Item item, Item srcItem)
         {
-            var oldTagStrings = srcItem["Tags"];
-            var newTagStrings = string.Empty;
-
-            if (!string.IsNullOrEmpty(oldTagStrings))
-            {
-                newTagStrings = getUpdatedTags(oldTagStrings);
-            }
+            var newTagStrings = getNewTags(srcItem, item);
             
             using (new SecurityDisabler())
             {
@@ -479,6 +594,19 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
                 item[Sitecore.FieldIDs.Created] = srcItem[Sitecore.FieldIDs.Created];
                 item.Editing.EndEdit();
             }
+        }
+
+        private string getNewTags(Item oldPost, Item newPost)
+        {
+            var oldTagStrings = oldPost["Tags"];
+            var newTagStrings = string.Empty;
+
+            if (!string.IsNullOrEmpty(oldTagStrings))
+            {
+                newTagStrings = getUpdatedTags(oldTagStrings);
+            }
+
+            return newTagStrings;
         }
 
         private string getUpdatedTags(string oldTagStrings)
@@ -607,12 +735,22 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
                     node.Attributes.Remove("width");
                 }
             }
-            
+
+            //find brush class and encode it's contents
+            var formattedNodes = bodyContent.SelectNodes("//pre[contains(@class, 'brush:xml')]");
+
+            if (formattedNodes != null)
+            {
+                foreach (var node in formattedNodes)
+                {
+                    node.InnerHtml = HttpUtility.HtmlEncode(node.InnerHtml);
+                }
+            }
 
             cleanMarkup = document.DocumentNode.OuterHtml;
             cleanMarkup = cleanMarkup.Replace("<html><body>", "");
             cleanMarkup = cleanMarkup.Replace("</body></html>", "");
-
+            cleanMarkup = cleanMarkup.Replace("&amp;", "&");
 
             return cleanMarkup;
         }
@@ -641,8 +779,8 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
             // Note: There are many more special characters, these are just
             // most common. You can add new characters in this arrays if needed
             string[] OldWords = {"&nbsp;", "&amp;", "&quot;", "&rsquo;","&lsquo;", "&lt;",
-   "&gt;", "&reg;", "&copy;", "&trade;","&#39;"};
-            string[] NewWords = { " ", "&", "\"", "\'", "\'", "<", ">", "®", "©", "™", "\'" };
+   "&gt;", "&reg;", "&copy;", "&trade;","&#39;","&hellip;"};
+            string[] NewWords = { " ", "&", "\"", "\'", "\'", "<", ">", "®", "©", "™", "\'", "…" };
             for (int i = 0; i < OldWords.Length; i++)
             {
                 sbHTML.Replace(OldWords[i], NewWords[i]);

@@ -139,6 +139,7 @@
     <Compile Include="Controllers\MigrationController.cs" />
     <Compile Include="Controllers\TaxonomyController.cs" />
     <Compile Include="Models\AuthorCard.cs" />
+    <Compile Include="Models\BlogPost.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
