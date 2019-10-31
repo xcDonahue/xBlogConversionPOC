@@ -83,6 +83,7 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
             {
                 //this is a blog post item so we need to create new post
                 processPost(item);
+
             }
 
         }
@@ -730,7 +731,7 @@ namespace Xcentium.xBlog2FlexMigrationBeta.Controllers
                 {
                     node.Attributes.Remove("class");
                     node.Attributes.Remove("id");
-                    node.Attributes.Remove("stlye");
+                    node.Attributes.Remove("style");
                     node.Attributes.Remove("height");
                     node.Attributes.Remove("width");
                 }
